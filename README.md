@@ -1,36 +1,94 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Jubiladores
 
-## Getting Started
+Plataforma transparente de análisis deportivo, publicación de picks y seguimiento de apuestas.
+Todos los picks quedan registrados, los ganados y los perdidos. Los perdidos de interés se analizan en **El Cementerio de los Jubiladores**.
 
-First, run the development server:
+**Stack:** Next.js 16 (App Router) · React 19 · TypeScript · Tailwind CSS 4 · Supabase · Vercel
+
+---
+
+## 1. Correrlo en tu computadora
+
+Necesitas [Node.js](https://nodejs.org) 20 o superior.
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Abre http://localhost:3000. Sin configurar Supabase, la app muestra **datos de demostración** (aparece un aviso amarillo arriba).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 2. Conectar Supabase
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. Crea un proyecto gratis en https://supabase.com.
+2. Ve a **SQL Editor**, pega todo el contenido de `supabase/migrations/0001_init.sql` y dale **Run**.
+3. Copia `.env.example` como `.env.local` y pon tu URL y tu `anon key` (Project Settings → API).
+4. Reinicia `npm run dev`.
 
-## Learn More
+**Hacerte admin** (solo los admin pueden crear o editar picks):
+1. En Supabase → Authentication → Users → *Add user*, créate un usuario.
+2. En el SQL Editor:
+   ```sql
+   update profiles set role = 'admin' where id = '<id-de-tu-usuario>';
+   insert into bankroll_settings (initial_bankroll, unit_value, currency) values (1000, 10, 'PEN');
+   ```
 
-To learn more about Next.js, take a look at the following resources:
+## 3. Subir a GitHub y desplegar en Vercel
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+git add . && git commit -m "Base inicial"
+git remote add origin https://github.com/<tu-usuario>/jubiladores.git
+git push -u origin main
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+En https://vercel.com → *Add New Project* → importa el repo → en **Environment Variables** añade las dos variables de `.env.local` → *Deploy*.
 
-## Deploy on Vercel
+## 4. Tests
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+npm test
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+---
+
+## Estructura
+
+```
+supabase/migrations/0001_init.sql   Esquema, reglas de transparencia y permisos (RLS)
+src/lib/betting.ts                  Cálculos: edge, riesgo, ROI, yield, acierto, Brier, historial
+src/lib/betting.test.ts             Tests de los cálculos
+src/lib/data.ts                     Lectura de Supabase (o datos demo si no está configurado)
+src/app/page.tsx                    Dashboard
+src/app/picks/                      Historial de picks
+src/app/bankroll/                   Bankroll Tracker
+src/app/cementerio/                 El Cementerio de los Jubiladores
+```
+
+## Decisiones de diseño
+
+**Clasificación de riesgo (estadística, no por cuota).** La calcula la base de datos, así que no se puede editar a mano:
+- `edge = probabilidad estimada × cuota − 1`
+- edge ≤ 0 → ⚪ **Sin valor** (no debería publicarse)
+- edge > 0 y probabilidad ≥ 55% → 🟢 **Conservador**
+- edge > 0 y probabilidad < 55% → 🔴 **Value / Arriesgado**
+
+El umbral del 55% está en dos sitios que deben coincidir: `CONSERVATIVE_MIN_PROB` en `src/lib/betting.ts` y la columna `risk` en el SQL.
+
+**Métricas.**
+- **Yield** = ganancia ÷ unidades apostadas (picks ganados + perdidos).
+- **ROI** = ganancia ÷ bankroll inicial.
+- **Acierto** = ganadas ÷ (ganadas + perdidas). Las anuladas no cuentan.
+- **Brier score** mide si las probabilidades estimadas están bien calibradas (0 = perfecto, 0.25 = tirar una moneda).
+
+**Transparencia garantizada por la base de datos.**
+- Un pick resuelto no se puede editar (cuota, stake, probabilidad, mercado, selección) ni borrar.
+- Solo los picks perdidos pueden entrar al Cementerio.
+
+**Cementerio.** Cada análisis obliga a elegir un veredicto: `varianza`, `error_modelo`, `factor_externo` o `mala_informacion`. Así se separa la mala suerte del mal análisis y no se “corrige” un modelo que estaba bien. Se guarda también la cuota de cierre para calcular el **CLV** (si el mercado se movió a nuestro favor).
+
+## Pendiente
+
+- [ ] Motor matemático (sección E de la especificación)
+- [ ] Panel de admin: formularios para crear partidos, publicar picks, resolverlos y escribir análisis del Cementerio
+- [ ] Login con Supabase Auth
+- [ ] Conexión a una API de partidos y cuotas
